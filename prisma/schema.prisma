@@ -1,0 +1,136 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+  // O database Neon do projeto também hospeda outro app (tabelas em
+  // `public`, Neon Auth, migrações do Drizzle). O TryMants vive num schema
+  // próprio, `trymants`, selecionado via search_path na DATABASE_URL
+  // (parâmetro `?schema=trymants`). Nada em `public` é lido ou escrito.
+  // Rollback: DROP SCHEMA trymants CASCADE;
+}
+
+model User {
+  id        String    @id @default(cuid())
+  email     String    @unique
+  name      String?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  sessions   Session[]
+  loginTokens LoginToken[]
+  clients    Client[]
+  projects   Project[]
+}
+
+model Session {
+  id        String   @id @default(cuid())
+  token     String   @unique
+  userId    String
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+model LoginToken {
+  id        String    @id @default(cuid())
+  email     String
+  tokenHash String    @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  userId String?
+  user   User?   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([email])
+  @@index([expiresAt])
+}
+
+enum ProjectStatus {
+  PLANEJAMENTO
+  EM_ANDAMENTO
+  PAUSADO
+  CONCLUIDO
+  CANCELADO
+}
+
+enum TaskStatus {
+  A_FAZER
+  FAZENDO
+  CONCLUIDA
+}
+
+model Client {
+  id        String   @id @default(cuid())
+  userId    String
+  name      String
+  email     String?
+  phone     String?
+  company   String?
+  notes     String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user     User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  projects Project[]
+
+  @@index([userId])
+  @@index([userId, name])
+}
+
+model Project {
+  id          String        @id @default(cuid())
+  userId      String
+  clientId    String
+  title       String
+  description String?
+  status      ProjectStatus @default(PLANEJAMENTO)
+  /// Valor total em centavos. R$ 800,00 = 80000. Inteiro de propósito:
+  /// evita o erro de ponto flutuante que Decimal traz para o JavaScript.
+  valueCents  Int?
+  /// Data de Combine: é um dia do calendário ("dia 20"), não um instante.
+  /// Guardar como timestamptz faria o prazo cair no dia anterior.
+  dueDate     DateTime?     @db.Date
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  client Client @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  tasks  Task[]
+
+  @@index([userId])
+  @@index([clientId])
+  @@index([userId, status])
+}
+
+model Task {
+  id          String     @id @default(cuid())
+  projectId   String
+  title       String
+  description String?
+  status      TaskStatus @default(A_FAZER)
+  position    Int        @default(0)
+  dueDate     DateTime?  @db.Date
+
+  /// Uma tarefa pode estar parada esperando o cliente — "a Maria pediu os
+  /// posts mas não enviou as fotos". Guardamos o motivo para que a tela
+  /// deixe claro que o gargalo está do lado de fora.
+  blocked       Boolean   @default(false)
+  blockedReason String?
+  blockedAt     DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId])
+  @@index([projectId, status])
+}
